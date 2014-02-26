@@ -12,7 +12,13 @@ typedef struct {
 	int period;
 } Tone;
 
+typedef struct {
+    Object super;
+    int note;
+} Song;
+
 Tone tone = { initObject(), 500 };
+Song song = { initObject(), 0 };
 
 typedef struct {
     Object super;
@@ -27,23 +33,33 @@ void receiver(App*, int);
 
 int background_loop_range = 0;
 int counter = 0;
-int sum = 0;
+int sum     = 0;
+
+//Indices
 int indices[32] = {0,2,4,0,0,2,4,0,4,5,7,4,5,7,7,9,7,5,4,0,7,9,7,5,4,0,0,-5,0,0,-5,0};
+//Periods
 int periods[25] = {2025,1911,1804,1703,1607,1517,1432,1351,1276,1204,1136,1073,1012,956,902,851,804,758,716,676,638,602,568,536,506};
-int max_index = 14;
-int min_index = -10;
-int timecounter = 0; 
+// Pitch stuff
+int pitch[32]   = {0,0,0,0,0,0,0,0,0,0,1,0,0,1,2,2,2,2,0,0,2,2,2,2,0,0,0,0,1,0,0,1};
+int pitchLenght[3] = {500, 1000, 250};
+int max_index   = 14;
+int min_index   = -10; 
 char buffer[20];
 char strOut[80];
 
 Serial sci0 = initSerial(SCI_PORT0, &app, reader);
 Can can0 = initCan(CAN0BASE, &app, receiver);
 
-void play(Tone *self, int unused){
+void playTone(Tone *self, int unused){
 	port_struct -> ptp = !port_struct -> ptp;
 	SEND(USEC(self->period), USEC(100), self, play, 0);
 }
 
+void playSong(Song *self, int unused){
+    SEND(USEC(pitchLenght[pitch[self -> note]], USEC(50), self, playSong, 0);
+    &tone -> period = periods[indices[self -> note]];
+    self -> note = self -> note + 1;
+}
 
 void receiver(App *self, int unused) {
     CANMsg msg;
@@ -53,37 +69,38 @@ void receiver(App *self, int unused) {
 }
 
 void reader(App *self, int c) {
-    int periodIndex;
-    int i, buff1, buff2;
-    Time gb;
     SCI_WRITE(&sci0, "Rcv: \'");
-    if (c == 'f'){
-	sum = 0;
-	counter = 0;
-	background_loop_range = sum;
-	SCI_WRITE(&sci0, "Reset program");
-    }
-    else{
-	if ((c == 'e') && (counter != 19)){
-		sum = atoi(buffer);
+    if (c == 'f') {
+		sum = 0;
+		counter = 0;
 		background_loop_range = sum;
-		if ((sum <= -10) && (sum >= 14)){
-			&tone -> period = periods[indices[sum]];
+		SCI_WRITE(&sci0, "Reset program");
+	} else if (c == 'p') {
+        //Start loop
+        BEFORE(USEC(100), &tone, playTone, 0);
+    }
+	else {
+		if ((c == 'e') && (counter != 19)){
+			sum = atoi(buffer);
+			background_loop_range = sum;
+			if ((sum <= -10) && (sum >= 14)){
+				&tone->period = periods[indices[sum]];
+			}
+			else{
+				sprintf(strOut, "The key %i is out of range ", sum);
+				SCI_WRITE(&sci0, strOut);
+			};
+			counter = 0;
 		}
-		else{
-			sprintf(strOut, "The key %i is out of range ", sum);
+		else {
+			SCI_WRITECHAR(&sci0, c);
+			buffer[counter] = c;
+			buffer[counter + 1] = '\0';
+			counter = counter + 1;
+			sprintf(strOut, "%i", counter);
 			SCI_WRITE(&sci0, strOut);
 		};
-		counter = 0;
-	} else {
-		SCI_WRITECHAR(&sci0, c);
-		buffer[counter] = c;
-		buffer[counter+1] = '\0';
-		counter = counter + 1;
-		sprintf(strOut,"%i", counter);
-		SCI_WRITE(&sci0, strOut);
 	};
-    };
     SCI_WRITE(&sci0, "\'\n");
 }
 
@@ -96,8 +113,6 @@ void startApp(App *self, int arg) {
     
     //Set direction status of port p
     port_struct -> ddrp = 0xFF; 
-    //Start loop
-    BEFORE(USEC(100), &tone, play, 0);
     
     //CAN stuffz
     CAN_INIT(&can0);
