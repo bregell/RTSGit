@@ -14,8 +14,12 @@ App app = { initObject(), 0, 'X' };
 void reader(App*, int);
 void receiver(App*, int);
 
-Serial sci0 = initSerial(SCI_PORT0, &app, reader);
+int counter = 0;
+int sum = 0;
+char buffer[20];
+char strOut[40];
 
+Serial sci0 = initSerial(SCI_PORT0, &app, reader);
 Can can0 = initCan(CAN0BASE, &app, receiver);
 
 void receiver(App *self, int unused) {
@@ -27,7 +31,25 @@ void receiver(App *self, int unused) {
 
 void reader(App *self, int c) {
     SCI_WRITE(&sci0, "Rcv: \'");
-    SCI_WRITECHAR(&sci0, c);
+    if (c == 'f'){
+		sum = 0;
+		counter = 0;
+		SCI_WRITE(&sci0, "Reset program");
+    } else {
+		if ((c == 'e') && (counter != 19)){
+			sum = sum + atoi(buffer);
+			counter = 0;
+			sprintf(strOut,"The value is %i \n The running sum is %i", atoi(buffer), sum);
+			SCI_WRITE(&sci0, strOut);
+		} else {
+			SCI_WRITECHAR(&sci0, c);
+			buffer[counter] = c;
+			buffer[counter+1] = '\0';
+			counter = counter + 1;
+			sprintf(strOut,"%i", counter);
+			SCI_WRITE(&sci0, strOut);
+		};
+    };
     SCI_WRITE(&sci0, "\'\n");
 }
 
