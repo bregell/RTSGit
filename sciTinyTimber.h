@@ -4,7 +4,7 @@
 #include <machine/hcs12.h>
 #include <machine/hcs12/sci.h>
 
-#define SCI_BUFSIZE  1024
+#define SCI_BUFSIZE  2048
 
 typedef struct {
     Object super;
