@@ -29,6 +29,7 @@ typedef struct {
     Time pitchLenght[3];
     int key;
     int state;
+    int playMode
 } Song;
 
 Song brotherJohn = { 
@@ -38,6 +39,7 @@ Song brotherJohn = {
     {0,0,0,0, 0,0,0,0, 0,0,1,0, 0,1,2,2, 2,2,0,0, 2,2,2,2, 0,0,0,0, 1,0,0,1},
     //a a a a, a a a a, a a b a, a b c c, c c a a, c c c c, a a a a, b a a b    
     {MSEC(500), MSEC(1000), MSEC(250)}, 
+    0,
     0,
     0,
     0
@@ -78,7 +80,6 @@ char    strOut[80];
 
 //Variable for CAN sync
 int leaderId;
-int playMode;
 int step = 4;
 
 //Periods for generating sound 1/p = f
@@ -96,8 +97,8 @@ Can can0 = initCan(CAN0BASE, &app, receiver);
 //Function to play one tone forever
 void playTone(Tone *self, int arg){
     port_struct -> ptp = !port_struct -> ptp;
-    if(self->state){
-        SEND(USEC(self->period), USEC(50), self, playTone, 0);
+    if(self -> state){
+        SEND(USEC(self -> period), USEC(50), self, playTone, 0);
     }
 }
 
@@ -123,14 +124,14 @@ void playSong(Song *self, int arg){
         //Am I the leader?
         if (leaderId == NODE_ID){
             //If play mode is sequential    
-            if (playMode == 2) {
+            if (self -> playMode == 2) {
                 //If it your turn play note
-                if(!((self->noteCounter)%2) && (self->noteCounter != 0)){
+                if(!((self -> noteCounter)%2) && (self -> noteCounter != 0)){
                     SYNC(&tone, controlTone, 1);
                     ASYNC(&tone, playTone, 0);
                 } 
                 //Else do not output sound
-                else if (self->noteCounter != 0) {
+                else if (self -> noteCounter != 0) {
                     SYNC(&tone, controlTone, 0);
                 }
             }
@@ -146,8 +147,13 @@ void playSong(Song *self, int arg){
 
 //Function to stop the song
 void controlSong(Song *self, int state) {
-    self->state = state;
+    self -> state = state;
     self -> noteCounter = 0;
+}
+
+//Set play mode
+void setPlayMode(Song *self, int mode){
+    self -> playMode = mode;
 }
 
 //Function to change to key
@@ -176,7 +182,7 @@ void sendNext(Song *self, int targetNode){
     msg.msgId = 6;
     msg.nodeId = NODE_ID;
     msg.length = 2;
-    msg.buff[0] = (uchar)playMode;
+    msg.buff[0] = (uchar)brotherJohn.playMode;
     msg.buff[1] = (uchar)targetNode;
     CAN_SEND(&can0, &msg);
 }
@@ -187,8 +193,7 @@ void receiver(App *self, int unused) {
     CAN_RECEIVE(&can0, &msg);
     //Play normal initiation message
     if((msg.msgId == 0) && (msg.nodeId == leaderId)){
-        leaderId = msg.nodeId;
-        playMode = 0;
+        SYNC(&brotherJohn, setPlayMode, 0);
         SYNC(&brotherJohn, changeKey, (int)(msg.buff[0]-5));  
         SYNC(&tone, controlTone, 1);
         SYNC(&brotherJohn, controlSong, 1);
@@ -210,8 +215,7 @@ void receiver(App *self, int unused) {
     } 
     //Play Canon initiation message
     else if ((msg.msgId == 3) && (msg.nodeId == leaderId)) { 
-        leaderId = msg.nodeId;
-        playMode = 1;    
+        SYNC(&brotherJohn, setPlayMode, 1);    
         SYNC(&brotherJohn, changeKey, (int)(msg.buff[0]-5));
         SYNC(&brotherJohn, changeTempo, (int)(200+4*msg.buff[5]));
         step = (int)(msg.buff[2]);
@@ -227,8 +231,7 @@ void receiver(App *self, int unused) {
     } 
     //Play Sequential initiation message
     else if ((msg.msgId == 4) && (msg.nodeId == leaderId)) { 
-        leaderId = msg.nodeId;
-        playMode = 2;
+        SYNC(&brotherJohn, setPlayMode, 2);
         SYNC(&tone, controlTone, 1);
         SYNC(&brotherJohn, controlSong, 1);
         ASYNC(&brotherJohn, playSong, 0);
@@ -278,6 +281,7 @@ void receiver(App *self, int unused) {
 void reader(App *self, int c) {
     //Create CAN message
     CANMsg msg;
+    msg.nodeId = NODE_ID;
     //int tempo;
     int i;
     if (c == 'r') {
@@ -288,15 +292,12 @@ void reader(App *self, int c) {
         if(leaderId == NODE_ID){
             SCI_WRITE(&sci0, "Start song \n");
             //Send start message
-            msg.msgId = 0;
-            msg.nodeId = NODE_ID;
+            msg.msgId = 0;         
             msg.length = 1;
             msg.buff[0] = (uchar)(brotherJohn.key+5);
             CAN_SEND(&can0, &msg);
-            //Set leader to self
-            leaderId = NODE_ID;
-            playMode = 0;
-            //Start playing song 
+            //Start playing song
+            SYNC(&brotherJohn, setPlayMode, 0); 
             SYNC(&tone, controlTone, 1);
             SYNC(&brotherJohn, controlSong, 1);
             ASYNC(&tone, playTone, 0);
@@ -309,47 +310,39 @@ void reader(App *self, int c) {
             SCI_WRITE(&sci0, "Start sequential \n");
             //Send start message 
             msg.msgId = 4;
-            msg.nodeId = NODE_ID;
             msg.length = 2;
             msg.buff[0] = (uchar)(brotherJohn.key+5);
             msg.buff[1] = (uchar)((MSEC_OF(brotherJohn.pitchLenght[0])-200)/4);
             CAN_SEND(&can0, &msg);
-            //Set leader to self
-            leaderId = NODE_ID;
-            playMode = 2;
             //Start playing song 
+            SYNC(&brotherJohn, setPlayMode, 2);       
             SYNC(&tone, controlTone, 1);
             SYNC(&brotherJohn, controlSong, 1);
             ASYNC(&tone, playTone, 0);
             ASYNC(&brotherJohn, playSong, 0);
-            brotherJohn.mode = 1;
         } else {
             SCI_WRITE(&sci0, "Not leader, clain leadership first \n");
         }
     } else if (c == 'c') {
         if(leaderId == NODE_ID){
+            sprintf(strOut, "Start Canon, NodeId: %i ,Key: %i-5, Offset: %i, Tempo: %i\n", NODE_ID, (int)msg.buff[0], (int)msg.buff[5]);
+            SCI_WRITE(&sci0, strOut);
             //Send start message Canon
             msg.msgId = 3;
-            msg.nodeId = NODE_ID;
             msg.length = 6;
             msg.buff[0] = (uchar)brotherJohn.key+5;
             msg.buff[1] = step * 3;
             msg.buff[2] = step;
             msg.buff[3] = step * 1;
             msg.buff[4] = step * 2;
-            //a=200+4*["Tempo"]
             msg.buff[5] = (uchar)((MSEC_OF(brotherJohn.pitchLenght[0])-200)/4);
             CAN_SEND(&can0, &msg);
-            leaderId = NODE_ID;
-            playMode = 1;
             //Start playing song 
+            SYNC(&brotherJohn, setPlayMode, 1);
             SYNC(&tone, controlTone, 1);
             SYNC(&brotherJohn, controlSong, 1);
             ASYNC(&tone, playTone, 0);
-            ASYNC(&brotherJohn, playSong, 0);
-            brotherJohn.mode = 1;
-            sprintf(strOut, "Start Canon, NodeId: %i ,Key: %i-5, Offset: %i, Tempo: %i\n", NODE_ID, (int)msg.buff[0], (int)msg.buff[5]);
-            SCI_WRITE(&sci0, strOut);
+            ASYNC(&brotherJohn, playSong, 0);     
         } else {
             SCI_WRITE(&sci0, "Not leader, clain leadership first \n");
         }
@@ -362,19 +355,15 @@ void reader(App *self, int c) {
         }
         //Send stop message
         msg.msgId = 5;
-        msg.nodeId = NODE_ID;
         msg.length = 0;
-        //msg.buff = {};
         CAN_SEND(&can0, &msg);
         //Stop playing song
-        brotherJohn.mode = 0;
         SYNC(&brotherJohn, controlSong, 0);
         SYNC(&tone, controlTone, 0);
     } else if ((c == 'k') && (counter != 19)){
         sum = atoi(buffer);
         if ((sum >= -5) && (sum <= 5) && (NODE_ID == leaderId)) {
             msg.msgId = 1;
-            msg.nodeId = NODE_ID;
             msg.length = 1;
             msg.buff[0] = (uchar)sum+5;
             CAN_SEND(&can0, &msg);
